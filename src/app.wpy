@@ -12,6 +12,7 @@
 <script>
 import wepy from 'wepy'
 import 'wepy-async-function'
+import WxUtils from './utils/WxUtils'
 
 import { setStore } from 'wepy-redux'
 import configStore from './store'
@@ -33,42 +34,68 @@ export default class extends wepy.app {
   }
 
   globalData = {
-    userInfo: null
+    auth: {}
   }
 
   constructor () {
     super()
     this.use('requestfix')
-  }
-
-  onLaunch() {
-    this.testAsync()
-  }
-
-  sleep (s) {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        resolve('promise resolved')
-      }, s * 1000)
-    })
-  }
-
-  async testAsync () {
-    const data = await this.sleep(3)
-    console.log(data)
-  }
-
-  getUserInfo(cb) {
-    const that = this
-    if (this.globalData.userInfo) {
-      return this.globalData.userInfo
-    }
-    wepy.getUserInfo({
-      success (res) {
-        that.globalData.userInfo = res.userInfo
-        cb && cb(res.userInfo)
+    this.use('promisify')
+    this.intercept('request', {
+      config (p) {
+        p.header = this.createAuthHeader()
+        return p
       }
     })
+    this.intercept('uploadFile', {
+      config (p) {
+        p.header = this.createAuthHeader()
+        return p
+      },
+      success (p) {
+        return p.data
+      }
+    })
+  }
+
+  /**
+   * 构造权限头部
+   */
+  createAuthHeader () {
+    const loginCode = wepy.$instance.globalData.auth.login_code
+    const header = {}
+    if (loginCode) {
+      header['login_code'] = loginCode
+    }
+    return header
+  }
+
+  onLaunch(param) {
+    WxUtils.checkSDK()
+    // 同步开放平台EXT数据
+    const ext = wepy.getExtConfigSync()
+    if (ext.globalConfig) {
+      Object.assign(ext, ext.globalConfig)
+    }
+    Object.assign(wepy.$instance.globalData, ext)
+    // 同步权限数据
+    this.syncStoreConfig('login_code')
+    this.syncStoreConfig('third_session')
+    this.syncStoreConfig('user')
+    // 获取保存场景值
+    if (param && param.scene) {
+      wepy.$instance.globalData.scene = param.scene
+    }
+  }
+  syncStoreConfig(key) {
+    try {
+      const value = wepy.getStorageSync(key)
+      if (value !== '') {
+        wepy.$instance.globalData.auth[key] = value
+      }
+    } catch (e) {
+      console.warn(`[auth]${key} sync fail `)
+    }
   }
 }
 </script>
